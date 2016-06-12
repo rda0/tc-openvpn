@@ -26,7 +26,9 @@ Replace the DNS servers in the last 2 lines with the correct IP addresses.
 
 **Traffic control script [`/etc/openvpn/tc/tc.sh`](https://github.com/rda0/tc-openvpn/blob/master/tc.sh):**
 
+Make it executable:
 
+    chmod +x /etc/openvpn/tc/tc.sh
 
 **Subscription database directory `/etc/openvpn/tc/db/`:**
 
