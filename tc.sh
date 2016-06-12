@@ -6,7 +6,7 @@ ip="$ifconfig_pool_remote_ip"
 cn="$common_name"
 ip_local="$ifconfig_local"
 
-debug=0
+debug=2
 log=/tmp/tc.log
 
 if [[ "$debug" > 0 ]]; then
@@ -61,7 +61,7 @@ start_tc() {
   echo "$dev" > "$ipdir"/dev
 
   tc qdisc add dev "$dev" root handle 1: htb
-  tc qdisc add dev "$dev" handle ffff: ingress
+  # tc qdisc add dev "$dev" handle ffff: ingress
 
   tc filter add dev "$dev" parent 1:0 prio 1 protocol ip u32
   tc filter add dev "$dev" parent 1:0 prio 1 handle 2: protocol ip u32 divisor 256
@@ -69,9 +69,17 @@ start_tc() {
       match ip dst "${ip_local_byte1}"."${ip_local_byte2}".0.0/16 \
       hashkey mask 0x000000ff at 16 link 2:
 
-  tc filter add dev "$dev" parent ffff:0 prio 1 protocol ip u32
-  tc filter add dev "$dev" parent ffff:0 prio 1 handle 3: protocol ip u32 divisor 256
-  tc filter add dev "$dev" parent ffff:0 prio 1 protocol ip u32 ht 800:: \
+  modprobe ifb numifbs=1
+  ip link set dev ifb0 up
+
+  tc qdisc add dev "$dev" handle ffff: ingress
+  tc filter add dev "$dev" parent ffff: protocol ip u32 match u32 0 0 action mirred egress redirect dev ifb0
+
+  tc qdisc add dev ifb0 root handle 1: htb
+
+  tc filter add dev ifb0 parent 1:0 prio 1 protocol ip u32
+  tc filter add dev ifb0 parent 1:0 prio 1 handle 3: protocol ip u32 divisor 256
+  tc filter add dev ifb0 parent 1:0 prio 1 protocol ip u32 ht 800:: \
       match ip src "${ip_local_byte1}"."${ip_local_byte2}".0.0/16 \
       hashkey mask 0x000000ff at 12 link 3:
 }
@@ -81,6 +89,11 @@ stop_tc() {
 
   tc qdisc del dev "$dev" root
   tc qdisc del dev "$dev" handle ffff: ingress
+
+  tc qdisc del dev ifb0 root
+
+  ip link set dev ifb0 down
+  rmmod ifb
 
   [ -e "$ipdir"/dev ] && rm "$ipdir"/dev
 }
@@ -119,10 +132,16 @@ function bwlimit-enable() {
 
   # Limit traffic from client to VPN server
   # Maybe better use ifb for ingress? See: http://serverfault.com/a/386791/209089
-  tc filter add dev "$dev" parent ffff:0 protocol ip prio 1 \
+
+  tc class add dev ifb0 parent 1: classid 1:"$classid" htb rate "$uprate"
+  tc filter add dev ifb0 parent 1:0 protocol ip prio 1 \
       handle 3:"${hash}":"${handle}" \
-      u32 ht 3:"${hash}": match ip src "$ip"/32 \
-      police rate "$uprate" burst 80k drop flowid :"$classid"
+      u32 ht 3:"${hash}": match ip src "$ip"/32 flowid 1:"$classid"
+
+  #tc filter add dev "$dev" parent ffff:0 protocol ip prio 1 \
+  #    handle 3:"${hash}":"${handle}" \
+  #    u32 ht 3:"${hash}": match ip src "$ip"/32 \
+  #    police rate "$uprate" burst 80k drop flowid :"$classid"
 }
 
 function bwlimit-disable() {
@@ -133,8 +152,13 @@ function bwlimit-disable() {
   tc filter del dev "$dev" parent 1:0 protocol ip prio 1 \
       handle 2:"${hash}":"${handle}" u32 ht 2:"${hash}":
   tc class del dev "$dev" classid 1:"$classid"
-  tc filter del dev "$dev" parent ffff:0 protocol ip prio 1 \
+
+  tc filter del dev ifb0 parent 1:0 protocol ip prio 1 \
       handle 3:"${hash}":"${handle}" u32 ht 3:"${hash}":
+  tc class del dev ifb0 classid 1:"$classid"
+
+  #tc filter del dev "$dev" parent ffff:0 protocol ip prio 1 \
+  #    handle 3:"${hash}":"${handle}" u32 ht 3:"${hash}":
 
   # Remove .ip
   [ -e "$ipdir"/"$cn".ip ] && rm "$ipdir"/"$cn".ip
