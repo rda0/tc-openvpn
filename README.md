@@ -45,6 +45,10 @@ This directory contains a file per client named after its **CN-name** containing
 
 This directory will contain the `CN-name <-> IP-address` relation and the `tun interface` during run-time, which has to be provided for an external application updating the `tc` settings while clients are connected.
 
+<!-- language: bash -->
+
+    mkdir -p /etc/openvpn/tc/ip
+
 It will look as follows:
 
     root@ubuntu:/etc/openvpn/tc/ip# ls -l
